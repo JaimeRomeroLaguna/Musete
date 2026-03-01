@@ -34,5 +34,5 @@ class BettingState:
 @dataclass
 class HandResult:
     lance_results: dict[str, LanceResult]
-    player_stones_earned: int
-    bot_stones_earned: int
+    player_team_stones_earned: int
+    bot_team_stones_earned: int

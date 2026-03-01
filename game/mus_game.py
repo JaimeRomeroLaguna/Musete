@@ -10,8 +10,8 @@ class MusGame:
     """Sesión de juego multi-mano con marcador acumulado."""
 
     def __init__(self) -> None:
-        self.player_score: int = 0
-        self.bot_score: int = 0
+        self.player_team_score: int = 0
+        self.bot_team_score: int = 0
         self.round: MusRound = self._make_idle_round()
         self.is_game_over: bool = False
         self.winner: str = ""
@@ -25,8 +25,8 @@ class MusGame:
 
     def new_game(self) -> None:
         """Reset completo: marcador + nueva mano."""
-        self.player_score = 0
-        self.bot_score = 0
+        self.player_team_score = 0
+        self.bot_team_score = 0
         self.is_game_over = False
         self.winner = ""
         self.round = MusRound()
@@ -37,14 +37,14 @@ class MusGame:
 
     def apply_round_result(self, result: HandResult) -> None:
         """Acumula piedras al marcador y detecta si hay ganador."""
-        self.player_score += result.player_stones_earned
-        self.bot_score += result.bot_stones_earned
+        self.player_team_score += result.player_team_stones_earned
+        self.bot_team_score += result.bot_team_stones_earned
 
-        if self.player_score >= TARGET_SCORE:
+        if self.player_team_score >= TARGET_SCORE:
             self.is_game_over = True
-            self.winner = "Jugador"
+            self.winner = "Equipo Jugador"
             self.round.phase = GamePhase.GAME_OVER
-        elif self.bot_score >= TARGET_SCORE:
+        elif self.bot_team_score >= TARGET_SCORE:
             self.is_game_over = True
-            self.winner = "Bot"
+            self.winner = "Equipo Bot"
             self.round.phase = GamePhase.GAME_OVER

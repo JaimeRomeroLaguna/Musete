@@ -21,16 +21,47 @@ def _compare(p_eval, b_eval) -> LanceResult:
     return LanceResult(player_wins=False, bot_wins=False, is_tie=True)
 
 
+def _best_eval(evals: list):
+    """Returns the evaluation result that beats all others."""
+    best = evals[0]
+    for e in evals[1:]:
+        if e.beats(best):
+            best = e
+    return best
+
+
+def _combine_bot_team_initiate(a1: str, a2: str) -> str:
+    if "ordago" in (a1, a2):
+        return "ordago"
+    if "envido" in (a1, a2):
+        return "envido"
+    return "paso"
+
+
+def _combine_bot_team_respond(a1: str, a2: str, current_bet: int) -> str:
+    if "ordago" in (a1, a2):
+        return "ordago"
+    if "envido" in (a1, a2) and current_bet < 4:
+        return "envido"
+    if "quiero" in (a1, a2):
+        return "quiero"
+    return "no_quiero"
+
+
 class MusRound:
-    """Orquesta una mano completa de Mus (sin Qt)."""
+    """Orquesta una mano completa de Mus (4 jugadores, sin Qt)."""
 
     def __init__(self) -> None:
         self._bot = Bot()
         self._deck = Deck()
         self._deck.shuffle()
 
+        # Equipo A: jugador humano + compañero bot
         self.player_hand: Hand = Hand(cards=self._deck.deal(4))
-        self.bot_hand: Hand = Hand(cards=self._deck.deal(4))
+        self.partner_hand: Hand = Hand(cards=self._deck.deal(4))
+        # Equipo B: dos bots rivales
+        self.bot1_hand: Hand = Hand(cards=self._deck.deal(4))
+        self.bot2_hand: Hand = Hand(cards=self._deck.deal(4))
 
         self.phase: GamePhase = GamePhase.MUS_DECISION
 
@@ -46,7 +77,7 @@ class MusRound:
 
         # Resultado de cada lance
         self._lance_results: dict[str, LanceResult] = {}
-        self._lance_stones: dict[str, tuple[int, int]] = {}  # lance → (player, bot)
+        self._lance_stones: dict[str, tuple[int, int]] = {}  # lance → (player_team, bot_team)
 
         # Resultado final
         self.hand_result: Optional[HandResult] = None
@@ -55,20 +86,71 @@ class MusRound:
         self.status_message: str = "¿Mus o no hay mus?"
 
     # ------------------------------------------------------------------
+    # Helpers de evaluación por equipo
+    # ------------------------------------------------------------------
+
+    def _team_a_eval(self, lance: str):
+        """Best evaluation for Team A (player + partner) in the given lance."""
+        if lance == "grande":
+            return _best_eval([
+                HandEvaluator.evaluate_grande(self.player_hand),
+                HandEvaluator.evaluate_grande(self.partner_hand),
+            ])
+        if lance == "chica":
+            return _best_eval([
+                HandEvaluator.evaluate_chica(self.player_hand),
+                HandEvaluator.evaluate_chica(self.partner_hand),
+            ])
+        if lance == "pares":
+            return _best_eval([
+                HandEvaluator.evaluate_pares(self.player_hand),
+                HandEvaluator.evaluate_pares(self.partner_hand),
+            ])
+        # juego or punto
+        return _best_eval([
+            HandEvaluator.evaluate_juego(self.player_hand),
+            HandEvaluator.evaluate_juego(self.partner_hand),
+        ])
+
+    def _team_b_eval(self, lance: str):
+        """Best evaluation for Team B (bot1 + bot2) in the given lance."""
+        if lance == "grande":
+            return _best_eval([
+                HandEvaluator.evaluate_grande(self.bot1_hand),
+                HandEvaluator.evaluate_grande(self.bot2_hand),
+            ])
+        if lance == "chica":
+            return _best_eval([
+                HandEvaluator.evaluate_chica(self.bot1_hand),
+                HandEvaluator.evaluate_chica(self.bot2_hand),
+            ])
+        if lance == "pares":
+            return _best_eval([
+                HandEvaluator.evaluate_pares(self.bot1_hand),
+                HandEvaluator.evaluate_pares(self.bot2_hand),
+            ])
+        # juego or punto
+        return _best_eval([
+            HandEvaluator.evaluate_juego(self.bot1_hand),
+            HandEvaluator.evaluate_juego(self.bot2_hand),
+        ])
+
+    # ------------------------------------------------------------------
     # Fase MUS_DECISION
     # ------------------------------------------------------------------
 
     def player_mus(self) -> None:
-        """El jugador pide mus."""
+        """El jugador pide mus. Los 3 bots deciden; todos deben querer mus."""
         assert self.phase == GamePhase.MUS_DECISION
-        bot_wants_mus = self._bot.decide_mus(self.bot_hand)
-        if bot_wants_mus:
+        partner_wants = self._bot.decide_mus(self.partner_hand)
+        bot1_wants = self._bot.decide_mus(self.bot1_hand)
+        bot2_wants = self._bot.decide_mus(self.bot2_hand)
+        if partner_wants and bot1_wants and bot2_wants:
             self.phase = GamePhase.DISCARDING
             self.player_discard_indices = []
             self.status_message = "Mus aceptado. Elige cartas a descartar."
         else:
-            # Bot dice no hay mus → empezamos lances
-            self.status_message = "El bot no acepta mus. Comenzamos lances."
+            self.status_message = "Algún jugador no acepta mus."
             self._start_lances()
 
     def player_no_mus(self) -> None:
@@ -90,58 +172,79 @@ class MusRound:
             self.player_discard_indices.append(index)
 
     def player_confirm_discard(self) -> None:
-        """Aplica descartes del jugador, el bot descarta, rellenan manos."""
+        """Aplica descartes del jugador y de los 3 bots, rellenan manos."""
         assert self.phase == GamePhase.DISCARDING
 
-        # Cartas descartadas por el jugador
+        # Player discards
         player_discards = [
             self.player_hand.cards[i] for i in self.player_discard_indices
         ]
-        # Nuevas cartas del jugador (conserva las no descartadas)
         kept_player = [
             c for i, c in enumerate(self.player_hand.cards)
             if i not in self.player_discard_indices
         ]
 
-        # Bot descarta
-        bot_discard_indices = self._bot.decide_discard(self.bot_hand)
-        bot_discards = [self.bot_hand.cards[i] for i in bot_discard_indices]
-        kept_bot = [
-            c for i, c in enumerate(self.bot_hand.cards)
-            if i not in bot_discard_indices
+        # Partner discards
+        partner_idx = self._bot.decide_discard(self.partner_hand)
+        partner_discards = [self.partner_hand.cards[i] for i in partner_idx]
+        kept_partner = [
+            c for i, c in enumerate(self.partner_hand.cards)
+            if i not in partner_idx
         ]
 
-        # Devolver descartes al mazo
-        all_discards = player_discards + bot_discards
+        # Bot1 discards
+        bot1_idx = self._bot.decide_discard(self.bot1_hand)
+        bot1_discards = [self.bot1_hand.cards[i] for i in bot1_idx]
+        kept_bot1 = [
+            c for i, c in enumerate(self.bot1_hand.cards)
+            if i not in bot1_idx
+        ]
+
+        # Bot2 discards
+        bot2_idx = self._bot.decide_discard(self.bot2_hand)
+        bot2_discards = [self.bot2_hand.cards[i] for i in bot2_idx]
+        kept_bot2 = [
+            c for i, c in enumerate(self.bot2_hand.cards)
+            if i not in bot2_idx
+        ]
+
+        # Return all discards to deck
+        all_discards = player_discards + partner_discards + bot1_discards + bot2_discards
         if all_discards:
             self._deck.add_cards(all_discards)
 
-        # Rellenar manos
+        # Refill all hands
         need_player = 4 - len(kept_player)
-        need_bot = 4 - len(kept_bot)
-        total_needed = need_player + need_bot
+        need_partner = 4 - len(kept_partner)
+        need_bot1 = 4 - len(kept_bot1)
+        need_bot2 = 4 - len(kept_bot2)
+        total_needed = need_player + need_partner + need_bot1 + need_bot2
 
-        # Si el mazo no tiene suficientes cartas, rellenar lo que haya
         available = self._deck.remaining
         if available < total_needed:
-            # Ampliar con cartas sobrantes del mazo completo
             from game.deck import Deck as _Deck
             extra = _Deck()
             extra.shuffle()
             self._deck.add_cards(extra.deal(min(extra.remaining, total_needed - available)))
 
         new_player = self._deck.deal(min(need_player, self._deck.remaining))
-        new_bot = self._deck.deal(min(need_bot, self._deck.remaining))
+        new_partner = self._deck.deal(min(need_partner, self._deck.remaining))
+        new_bot1 = self._deck.deal(min(need_bot1, self._deck.remaining))
+        new_bot2 = self._deck.deal(min(need_bot2, self._deck.remaining))
 
         self.player_hand = Hand(cards=kept_player + new_player)
-        self.bot_hand = Hand(cards=kept_bot + new_bot)
+        self.partner_hand = Hand(cards=kept_partner + new_partner)
+        self.bot1_hand = Hand(cards=kept_bot1 + new_bot1)
+        self.bot2_hand = Hand(cards=kept_bot2 + new_bot2)
         self.player_discard_indices = []
 
-        # Bot decide si vuelve a pedir mus
-        bot_wants_mus = self._bot.decide_mus(self.bot_hand)
-        if bot_wants_mus:
+        # Bots decide if they want mus again; if all do → ask player again
+        partner_wants = self._bot.decide_mus(self.partner_hand)
+        bot1_wants = self._bot.decide_mus(self.bot1_hand)
+        bot2_wants = self._bot.decide_mus(self.bot2_hand)
+        if partner_wants and bot1_wants and bot2_wants:
             self.phase = GamePhase.MUS_DECISION
-            self.status_message = "El bot pide mus otra vez. ¿Mus o no hay mus?"
+            self.status_message = "Los bots piden mus otra vez. ¿Mus o no hay mus?"
         else:
             self._start_lances()
 
@@ -154,21 +257,32 @@ class MusRound:
         self._begin_lance(LANCES[0])
 
     def _begin_lance(self, lance: str) -> None:
-        # Evalúa si el lance es jugable
-        p_pares = HandEvaluator.evaluate_pares(self.player_hand)
-        b_pares = HandEvaluator.evaluate_pares(self.bot_hand)
-        p_juego = HandEvaluator.evaluate_juego(self.player_hand)
-        b_juego = HandEvaluator.evaluate_juego(self.bot_hand)
+        # Best pares and juego for each team
+        p_pares = _best_eval([
+            HandEvaluator.evaluate_pares(self.player_hand),
+            HandEvaluator.evaluate_pares(self.partner_hand),
+        ])
+        b_pares = _best_eval([
+            HandEvaluator.evaluate_pares(self.bot1_hand),
+            HandEvaluator.evaluate_pares(self.bot2_hand),
+        ])
+        p_juego = _best_eval([
+            HandEvaluator.evaluate_juego(self.player_hand),
+            HandEvaluator.evaluate_juego(self.partner_hand),
+        ])
+        b_juego = _best_eval([
+            HandEvaluator.evaluate_juego(self.bot1_hand),
+            HandEvaluator.evaluate_juego(self.bot2_hand),
+        ])
 
         if lance == "pares" and not pares_is_playable(p_pares, b_pares):
             self._skipped_lances.add(lance)
             self._lance_results[lance] = LanceResult(False, False, True)
             self._lance_stones[lance] = (0, 0)
-            self.status_message = "Pares: ninguno tiene pares, lance saltado."
+            self.status_message = "Pares: ningún equipo tiene pares, lance saltado."
             self._advance_to_next_lance()
             return
 
-        # Si nadie tiene juego, el lance se llama Punto
         display_lance = lance
         if lance == "juego" and not p_juego.has_juego and not b_juego.has_juego:
             display_lance = "punto"
@@ -203,7 +317,7 @@ class MusRound:
     def player_action(self, action: str) -> None:
         """
         El jugador actúa. action: 'paso' | 'envido' | 'quiero' | 'no_quiero' | 'ordago'
-        Después, el bot responde.
+        Después, el equipo bot responde.
         """
         assert self.phase == GamePhase.BETTING
         assert self.betting is not None
@@ -221,29 +335,31 @@ class MusRound:
             self._handle_no_quiero(actor="player")
 
         if not b.resolved:
-            # Turno del bot (sólo si el player apostó o pasó sin abrir)
             b.whose_turn = "bot"
-            self._bot_take_turn()
+            self._bot_team_take_turn()
         else:
             self._resolve_betting()
 
-    def _bot_take_turn(self) -> None:
+    def _bot_team_take_turn(self) -> None:
         assert self.betting is not None
         b = self.betting
         lance = b.lance
 
-        # ¿El bot necesita responder a una subida o iniciar?
-        # Si el jugador ha apostado (fold_winner == "player"), el bot responde
-        # Si no hay apuesta abierta, el bot inicia
         if b.fold_winner == "player":
-            # El jugador apostó → bot responde
-            bot_action = self._bot.decide_bet_respond(self.bot_hand, lance, b.current_bet)
+            # Player bet → bot team responds
+            a1 = self._bot.decide_bet_respond(self.bot1_hand, lance, b.current_bet)
+            a2 = self._bot.decide_bet_respond(self.bot2_hand, lance, b.current_bet)
+            bot_action = _combine_bot_team_respond(a1, a2, b.current_bet)
         elif b.fold_winner is None:
-            # Nadie ha apostado → bot inicia
-            bot_action = self._bot.decide_bet_initiate(self.bot_hand, lance, b.current_bet)
+            # No open bet → bot team initiates
+            a1 = self._bot.decide_bet_initiate(self.bot1_hand, lance, b.current_bet)
+            a2 = self._bot.decide_bet_initiate(self.bot2_hand, lance, b.current_bet)
+            bot_action = _combine_bot_team_initiate(a1, a2)
         else:
-            # fold_winner == "bot" (bot apostó, jugador pasó/envido más) → responder
-            bot_action = self._bot.decide_bet_respond(self.bot_hand, lance, b.current_bet)
+            # fold_winner == "bot" (bot team bet, player passed/re-raised) → respond
+            a1 = self._bot.decide_bet_respond(self.bot1_hand, lance, b.current_bet)
+            a2 = self._bot.decide_bet_respond(self.bot2_hand, lance, b.current_bet)
+            bot_action = _combine_bot_team_respond(a1, a2, b.current_bet)
 
         b.bot_last_action = bot_action
 
@@ -265,44 +381,38 @@ class MusRound:
 
     def _handle_paso(self, actor: str) -> None:
         b = self.betting
-        # Si hay una apuesta abierta (fold_winner != None), paso = no_quiero
+        # If there is an open bet, paso = no_quiero
         if b.fold_winner is not None:
             self._handle_no_quiero(actor)
             return
-        # Sin apuesta abierta: ambos pasan → premio base
+        # No open bet: if bot also passes → base prize
         if actor == "bot":
-            # El bot pasa después del jugador → ambos han pasado
             b.stones_awarded = b.base_stones
             b.resolved = True
-        # Si actor == "player": esperar al bot
 
     def _handle_envido(self, actor: str) -> None:
         b = self.betting
         b.current_bet = b.current_bet + 1
         b.bet_history.append(b.current_bet)
-        b.fold_winner = actor  # si el otro no quiere, este gana lo previo
+        b.fold_winner = actor
 
     def _handle_ordago(self, actor: str) -> None:
         b = self.betting
         b.current_bet = 40
         b.bet_history.append(40)
         b.fold_winner = actor
-        # El otro jugador deberá quiero/no_quiero en su siguiente turno
 
     def _handle_quiero(self, actor: str) -> None:
         b = self.betting
         b.stones_awarded = b.current_bet
         b.resolved = True
-        # El ganador se determina por evaluación de mano
 
     def _handle_no_quiero(self, actor: str) -> None:
         b = self.betting
-        # Gana quien apostó último (fold_winner); si no hay apuesta, gana el otro
         if b.fold_winner is not None:
             winner = b.fold_winner
         else:
             winner = "bot" if actor == "player" else "player"
-        # Premio = apuesta anterior (antes de la última subida)
         if len(b.bet_history) >= 2:
             b.stones_awarded = b.bet_history[-2]
         else:
@@ -317,7 +427,6 @@ class MusRound:
         lance = b.lance
 
         if b.was_fold:
-            # Alguien se echó → fold_winner gana stones_awarded
             winner_str = b.fold_winner
             if winner_str == "player":
                 lr = LanceResult(player_wins=True, bot_wins=False, is_tie=False)
@@ -325,7 +434,6 @@ class MusRound:
                 lr = LanceResult(player_wins=False, bot_wins=True, is_tie=False)
             stones = b.stones_awarded
         else:
-            # Quiero o ambos pasaron → evaluar por la mano
             lr = self._evaluate_lance(lance)
             stones = b.stones_awarded
 
@@ -344,27 +452,7 @@ class MusRound:
         )
 
     def _evaluate_lance(self, lance: str) -> LanceResult:
-        if lance == "grande":
-            return _compare(
-                HandEvaluator.evaluate_grande(self.player_hand),
-                HandEvaluator.evaluate_grande(self.bot_hand),
-            )
-        if lance == "chica":
-            return _compare(
-                HandEvaluator.evaluate_chica(self.player_hand),
-                HandEvaluator.evaluate_chica(self.bot_hand),
-            )
-        if lance == "pares":
-            return _compare(
-                HandEvaluator.evaluate_pares(self.player_hand),
-                HandEvaluator.evaluate_pares(self.bot_hand),
-            )
-        if lance in ("juego", "punto"):
-            return _compare(
-                HandEvaluator.evaluate_juego(self.player_hand),
-                HandEvaluator.evaluate_juego(self.bot_hand),
-            )
-        return LanceResult(False, False, True)
+        return _compare(self._team_a_eval(lance), self._team_b_eval(lance))
 
     # ------------------------------------------------------------------
     # Avanzar lance (llamado desde UI tras LANCE_RESULT)
@@ -384,10 +472,10 @@ class MusRound:
 
         self.hand_result = HandResult(
             lance_results=self._lance_results,
-            player_stones_earned=player_total,
-            bot_stones_earned=bot_total,
+            player_team_stones_earned=player_total,
+            bot_team_stones_earned=bot_total,
         )
         self.phase = GamePhase.HAND_OVER
         self.status_message = (
-            f"Mano terminada. Jugador: +{player_total} | Bot: +{bot_total}"
+            f"Mano terminada. Equipo Jugador: +{player_total} | Equipo Bot: +{bot_total}"
         )
