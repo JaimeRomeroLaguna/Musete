@@ -168,10 +168,15 @@ class MusRound:
             self._advance_to_next_lance()
             return
 
+        # Si nadie tiene juego, el lance se llama Punto
+        display_lance = lance
+        if lance == "juego" and not p_juego.has_juego and not b_juego.has_juego:
+            display_lance = "punto"
+
         base = base_stones_for_lance(lance, p_pares, b_pares, p_juego, b_juego)
 
         self.betting = BettingState(
-            lance=lance,
+            lance=display_lance,
             base_stones=base,
             current_bet=base,
             bet_history=[base],
@@ -182,7 +187,7 @@ class MusRound:
             stones_awarded=0,
         )
         self.phase = GamePhase.BETTING
-        self.status_message = f"Lance: {lance.upper()} — apuesta base {base} piedra(s). Tu turno."
+        self.status_message = f"Lance: {display_lance.upper()} — apuesta base {base} piedra(s). Tu turno."
 
     def _advance_to_next_lance(self) -> None:
         self._lance_index += 1
@@ -354,7 +359,7 @@ class MusRound:
                 HandEvaluator.evaluate_pares(self.player_hand),
                 HandEvaluator.evaluate_pares(self.bot_hand),
             )
-        if lance == "juego":
+        if lance in ("juego", "punto"):
             return _compare(
                 HandEvaluator.evaluate_juego(self.player_hand),
                 HandEvaluator.evaluate_juego(self.bot_hand),

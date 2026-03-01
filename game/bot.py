@@ -18,6 +18,7 @@ class Bot:
             "chica": self._decide_chica,
             "pares": self._decide_pares,
             "juego": self._decide_juego,
+            "punto": self._decide_juego,   # alias cuando nadie tiene juego
         }
         handler = handlers.get(lance)
         return handler(hand) if handler else "paso"
