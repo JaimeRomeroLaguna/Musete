@@ -231,13 +231,20 @@ class MainWindow(QMainWindow):
         self._player_card_widgets.clear()
 
         r = self._game.round
+        draggable = phase != GamePhase.IDLE
+
         for i, card in enumerate(r.player_hand.cards):
             w = CardWidget(card=card, face_down=False)
+
+            if draggable:
+                w.enable_drag(i)
+                w.reorder_requested.connect(self._on_card_reorder)
+
             if phase == GamePhase.DISCARDING:
                 w.set_selected(i in r.player_discard_indices)
-                idx = i  # capture
-                w.mousePressEvent = lambda _ev, ix=idx: self._on_card_click(ix)
-                w.setCursor(Qt.CursorShape.PointingHandCursor)
+                w.enable_click(i)
+                w.clicked.connect(self._on_card_click)
+
             self._player_card_widgets.append(w)
             self._player_cards_row.addWidget(w)
 
@@ -378,9 +385,28 @@ class MainWindow(QMainWindow):
         if r.phase != GamePhase.DISCARDING:
             return
         r.toggle_discard(index)
-        # Actualizar selección visual sin rebuild completo
         for i, w in enumerate(self._player_card_widgets):
             w.set_selected(i in r.player_discard_indices)
+
+    def _on_card_reorder(self, from_idx: int, to_idx: int) -> None:
+        """Intercambia dos cartas en la mano del jugador (cosmético)."""
+        r = self._game.round
+        cards = r.player_hand.cards
+        cards[from_idx], cards[to_idx] = cards[to_idx], cards[from_idx]
+
+        # Si estamos en descarte, la selección sigue a la carta, no a la posición
+        discards = r.player_discard_indices
+        was_from = from_idx in discards
+        was_to   = to_idx   in discards
+        if was_from != was_to:
+            if was_from:
+                discards.remove(from_idx)
+                discards.append(to_idx)
+            else:
+                discards.remove(to_idx)
+                discards.append(from_idx)
+
+        self._rebuild_player_cards(r.phase)
 
     def _on_confirm_discard(self) -> None:
         self._game.round.player_confirm_discard()
