@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -19,13 +20,15 @@ from game.evaluator import HandEvaluator
 from game.mus_game import MusGame
 from game.state import GamePhase
 from ui.card_widget import CardWidget
+from ui.character_widget import CharacterWidget
 from ui.score_widget import ScoreWidget
 
 # ── Paleta ─────────────────────────────────────────────────────────────
-BG_FELT = "#1B4332"
+BG_FELT   = "#1B4332"
 BG_ACTION = "#0F2922"
+BG_PANEL  = "#142D1E"
 TXT_WHITE = "#FFFFFF"
-TXT_DIM = "#A7F3D0"
+TXT_DIM   = "#A7F3D0"
 
 BTN_BASE = """
 QPushButton {{
@@ -51,12 +54,22 @@ def _make_btn(text: str, bg: str = "#2D6A4F", fg: str = "#FFFFFF",
     return btn
 
 
+def _dim_label(text: str, font_size: int = 13) -> QLabel:
+    lbl = QLabel(text)
+    lbl.setStyleSheet(f"color: {TXT_DIM}; font-size: {font_size}px;")
+    lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    lbl.setWordWrap(True)
+    return lbl
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self._game = MusGame()
-        self._player_card_widgets: list[CardWidget] = []
-        self._bot_card_widgets: list[CardWidget] = []
+        self._player_card_widgets:  list[CardWidget] = []
+        self._partner_card_widgets: list[CardWidget] = []
+        self._bot1_card_widgets:    list[CardWidget] = []
+        self._bot2_card_widgets:    list[CardWidget] = []
         self._setup_window()
         self._build_ui()
         self._refresh_ui()
@@ -67,8 +80,8 @@ class MainWindow(QMainWindow):
 
     def _setup_window(self) -> None:
         self.setWindowTitle("Musete — Partida de Mus")
-        self.setMinimumSize(1000, 860)
-        self.resize(1120, 960)
+        self.setMinimumSize(1200, 860)
+        self.resize(1400, 960)
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -76,51 +89,90 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         root = QVBoxLayout(central)
-        root.setContentsMargins(20, 14, 20, 14)
-        root.setSpacing(12)
+        root.setContentsMargins(16, 10, 16, 10)
+        root.setSpacing(10)
 
         # ── TOP BAR: marcadores ──────────────────────────────────────
         top_bar = QHBoxLayout()
-        self._score_bot = ScoreWidget("Bot")
+        self._score_bot = ScoreWidget("Eq. Bot")
         self._score_bot.setMinimumWidth(260)
         title_lbl = QLabel("MUSETE")
-        title_lbl.setFont(QFont("Georgia", 30, QFont.Weight.Bold))
+        title_lbl.setFont(QFont("Georgia", 28, QFont.Weight.Bold))
         title_lbl.setStyleSheet(f"color: {TXT_WHITE};")
         title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._score_player = ScoreWidget("Jugador")
+        self._score_player = ScoreWidget("Eq. Jugador")
         self._score_player.setMinimumWidth(260)
-
         top_bar.addWidget(self._score_bot)
         top_bar.addWidget(title_lbl, 1)
         top_bar.addWidget(self._score_player)
         root.addLayout(top_bar)
 
-        # ── BOT AREA ─────────────────────────────────────────────────
-        bot_area = QWidget()
-        bot_area.setStyleSheet("background: transparent;")
-        bot_vbox = QVBoxLayout(bot_area)
-        bot_vbox.setContentsMargins(0, 0, 0, 0)
-        bot_vbox.setSpacing(4)
+        # ── TABLE ROW ────────────────────────────────────────────────
+        table_row = QHBoxLayout()
+        table_row.setSpacing(12)
 
-        bot_label = QLabel("Bot")
-        bot_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        bot_label.setStyleSheet(f"color: {TXT_DIM};")
-        bot_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        bot_vbox.addWidget(bot_label)
+        # LEFT PANEL — Bot 1 (Roca)
+        left_panel = QWidget()
+        left_panel.setFixedWidth(260)
+        left_panel.setStyleSheet("background: transparent;")
+        left_vbox = QVBoxLayout(left_panel)
+        left_vbox.setContentsMargins(6, 6, 6, 6)
+        left_vbox.setSpacing(6)
+        left_vbox.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        self._bot_cards_row = QHBoxLayout()
-        self._bot_cards_row.setSpacing(8)
-        self._bot_cards_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        bot_vbox.addLayout(self._bot_cards_row)
+        self._bot1_character = CharacterWidget(character_id=1, mood="neutral")
+        bot1_name = QLabel("Roca")
+        bot1_name.setFont(QFont("Arial", 13, QFont.Weight.Bold))
+        bot1_name.setStyleSheet(f"color: {TXT_DIM};")
+        bot1_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self._bot_eval_label = QLabel("—")
-        self._bot_eval_label.setStyleSheet(f"color: {TXT_DIM}; font-size: 15px;")
-        self._bot_eval_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        bot_vbox.addWidget(self._bot_eval_label)
+        bot1_cards_widget = QWidget()
+        bot1_cards_widget.setStyleSheet("background: transparent;")
+        self._bot1_cards_grid = QGridLayout(bot1_cards_widget)
+        self._bot1_cards_grid.setSpacing(4)
+        self._bot1_cards_grid.setContentsMargins(0, 0, 0, 0)
 
-        root.addWidget(bot_area)
+        self._bot1_eval_label = _dim_label("—")
 
-        # ── ACTION FRAME ─────────────────────────────────────────────
+        left_vbox.addWidget(self._bot1_character)
+        left_vbox.addWidget(bot1_name)
+        left_vbox.addWidget(bot1_cards_widget)
+        left_vbox.addWidget(self._bot1_eval_label)
+
+        # CENTER PANEL
+        center_panel = QVBoxLayout()
+        center_panel.setSpacing(8)
+
+        # Partner box (Compañero / Paco)
+        partner_box = QFrame()
+        partner_box.setStyleSheet(f"""
+            QFrame {{
+                background-color: {BG_PANEL};
+                border-radius: 10px;
+            }}
+        """)
+        pb_vbox = QVBoxLayout(partner_box)
+        pb_vbox.setContentsMargins(10, 8, 10, 8)
+        pb_vbox.setSpacing(4)
+
+        self._partner_character = CharacterWidget(character_id=0, mood="neutral")
+        partner_name = QLabel("Paco  —  Compañero")
+        partner_name.setFont(QFont("Arial", 13, QFont.Weight.Bold))
+        partner_name.setStyleSheet(f"color: {TXT_DIM};")
+        partner_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self._partner_cards_row = QHBoxLayout()
+        self._partner_cards_row.setSpacing(6)
+        self._partner_cards_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self._partner_eval_label = _dim_label("—")
+
+        pb_vbox.addWidget(self._partner_character)
+        pb_vbox.addWidget(partner_name)
+        pb_vbox.addLayout(self._partner_cards_row)
+        pb_vbox.addWidget(self._partner_eval_label)
+
+        # Action frame
         action_frame = QFrame()
         action_frame.setStyleSheet(f"""
             QFrame {{
@@ -129,22 +181,22 @@ class MainWindow(QMainWindow):
             }}
         """)
         af_vbox = QVBoxLayout(action_frame)
-        af_vbox.setContentsMargins(18, 14, 18, 14)
-        af_vbox.setSpacing(8)
+        af_vbox.setContentsMargins(18, 12, 18, 12)
+        af_vbox.setSpacing(6)
 
         self._lance_label = QLabel("—")
-        self._lance_label.setFont(QFont("Arial", 28, QFont.Weight.Bold))
+        self._lance_label.setFont(QFont("Arial", 26, QFont.Weight.Bold))
         self._lance_label.setStyleSheet(f"color: {TXT_WHITE};")
         self._lance_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         af_vbox.addWidget(self._lance_label)
 
         self._bet_label = QLabel("")
-        self._bet_label.setStyleSheet(f"color: {TXT_DIM}; font-size: 18px;")
+        self._bet_label.setStyleSheet(f"color: {TXT_DIM}; font-size: 16px;")
         self._bet_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         af_vbox.addWidget(self._bet_label)
 
         self._status_label = QLabel("Pulsa «NUEVA PARTIDA» para empezar.")
-        self._status_label.setStyleSheet(f"color: {TXT_DIM}; font-size: 16px;")
+        self._status_label.setStyleSheet(f"color: {TXT_DIM}; font-size: 15px;")
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._status_label.setWordWrap(True)
         af_vbox.addWidget(self._status_label)
@@ -154,32 +206,71 @@ class MainWindow(QMainWindow):
         self._btn_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
         af_vbox.addLayout(self._btn_row)
 
-        root.addWidget(action_frame)
+        center_panel.addWidget(partner_box)
+        center_panel.addWidget(action_frame, 1)
 
-        # ── PLAYER AREA ───────────────────────────────────────────────
-        player_area = QWidget()
-        player_area.setStyleSheet("background: transparent;")
-        player_vbox = QVBoxLayout(player_area)
-        player_vbox.setContentsMargins(0, 0, 0, 0)
-        player_vbox.setSpacing(4)
+        # RIGHT PANEL — Bot 2 (Lola)
+        right_panel = QWidget()
+        right_panel.setFixedWidth(260)
+        right_panel.setStyleSheet("background: transparent;")
+        right_vbox = QVBoxLayout(right_panel)
+        right_vbox.setContentsMargins(6, 6, 6, 6)
+        right_vbox.setSpacing(6)
+        right_vbox.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        self._player_eval_label = QLabel("—")
-        self._player_eval_label.setStyleSheet(f"color: {TXT_DIM}; font-size: 15px;")
-        self._player_eval_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        player_vbox.addWidget(self._player_eval_label)
+        self._bot2_character = CharacterWidget(character_id=2, mood="neutral")
+        bot2_name = QLabel("Lola")
+        bot2_name.setFont(QFont("Arial", 13, QFont.Weight.Bold))
+        bot2_name.setStyleSheet(f"color: {TXT_DIM};")
+        bot2_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        bot2_cards_widget = QWidget()
+        bot2_cards_widget.setStyleSheet("background: transparent;")
+        self._bot2_cards_grid = QGridLayout(bot2_cards_widget)
+        self._bot2_cards_grid.setSpacing(4)
+        self._bot2_cards_grid.setContentsMargins(0, 0, 0, 0)
+
+        self._bot2_eval_label = _dim_label("—")
+
+        right_vbox.addWidget(self._bot2_character)
+        right_vbox.addWidget(bot2_name)
+        right_vbox.addWidget(bot2_cards_widget)
+        right_vbox.addWidget(self._bot2_eval_label)
+
+        table_row.addWidget(left_panel)
+        table_row.addLayout(center_panel, 1)
+        table_row.addWidget(right_panel)
+        root.addLayout(table_row, 1)
+
+        # ── PLAYER SECTION (prominent, bottom) ───────────────────────
+        player_frame = QFrame()
+        player_frame.setStyleSheet("""
+            QFrame {
+                background-color: #0D2E1C;
+                border: 2px solid #4ADE80;
+                border-radius: 14px;
+            }
+        """)
+        pf_vbox = QVBoxLayout(player_frame)
+        pf_vbox.setContentsMargins(16, 10, 16, 10)
+        pf_vbox.setSpacing(6)
+
+        self._player_eval_label = _dim_label("—")
 
         self._player_cards_row = QHBoxLayout()
         self._player_cards_row.setSpacing(8)
         self._player_cards_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        player_vbox.addLayout(self._player_cards_row)
 
-        player_label = QLabel("Jugador")
-        player_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        player_label.setStyleSheet(f"color: {TXT_DIM};")
-        player_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        player_vbox.addWidget(player_label)
+        player_name_lbl = QLabel("JUGADOR")
+        player_name_lbl.setFont(QFont("Arial", 18, QFont.Weight.Bold))
+        player_name_lbl.setStyleSheet(f"color: {TXT_DIM};")
+        player_name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        root.addWidget(player_area)
+        pf_vbox.addWidget(self._player_eval_label)
+        pf_vbox.addLayout(self._player_cards_row)
+        pf_vbox.addWidget(player_name_lbl)
+
+        root.addWidget(player_frame)
 
     # ------------------------------------------------------------------
     # Refresh UI según fase
@@ -189,12 +280,11 @@ class MainWindow(QMainWindow):
         r = self._game.round
         phase = r.phase
 
-        self._score_player.set_score(self._game.player_score)
-        self._score_bot.set_score(self._game.bot_score)
+        self._score_player.set_score(self._game.player_team_score)
+        self._score_bot.set_score(self._game.bot_team_score)
 
         self._status_label.setText(r.status_message)
 
-        # Actualizar etiquetas de apuesta
         if phase == GamePhase.BETTING and r.betting:
             b = r.betting
             self._lance_label.setText(b.lance.upper())
@@ -213,14 +303,13 @@ class MainWindow(QMainWindow):
             self._lance_label.setText("MUSETE")
             self._bet_label.setText("")
 
-        # Cartas del jugador
         self._rebuild_player_cards(phase)
-        # Cartas del bot
-        self._rebuild_bot_cards(phase)
-        # Botones
+        self._rebuild_partner_cards(phase)
+        self._rebuild_bot1_cards(phase)
+        self._rebuild_bot2_cards(phase)
         self._rebuild_buttons(phase)
-        # Evaluaciones
         self._update_eval_labels(phase)
+        self._update_character_moods(phase)
 
     # ------------------------------------------------------------------
     # Cartas
@@ -248,21 +337,50 @@ class MainWindow(QMainWindow):
             self._player_card_widgets.append(w)
             self._player_cards_row.addWidget(w)
 
-    def _rebuild_bot_cards(self, phase: GamePhase) -> None:
-        self._clear_layout(self._bot_cards_row)
-        self._bot_card_widgets.clear()
+    def _rebuild_partner_cards(self, phase: GamePhase) -> None:
+        self._clear_layout(self._partner_cards_row)
+        self._partner_card_widgets.clear()
 
         r = self._game.round
         face_down = phase not in (GamePhase.HAND_OVER, GamePhase.GAME_OVER)
-        for card in r.bot_hand.cards:
+        for card in r.partner_hand.cards:
             w = CardWidget(card=card, face_down=face_down)
-            self._bot_card_widgets.append(w)
-            self._bot_cards_row.addWidget(w)
+            self._partner_card_widgets.append(w)
+            self._partner_cards_row.addWidget(w)
+
+    def _rebuild_bot1_cards(self, phase: GamePhase) -> None:
+        self._clear_grid(self._bot1_cards_grid)
+        self._bot1_card_widgets.clear()
+
+        r = self._game.round
+        face_down = phase not in (GamePhase.HAND_OVER, GamePhase.GAME_OVER)
+        for i, card in enumerate(r.bot1_hand.cards):
+            w = CardWidget(card=card, face_down=face_down)
+            self._bot1_card_widgets.append(w)
+            self._bot1_cards_grid.addWidget(w, i // 2, i % 2)
+
+    def _rebuild_bot2_cards(self, phase: GamePhase) -> None:
+        self._clear_grid(self._bot2_cards_grid)
+        self._bot2_card_widgets.clear()
+
+        r = self._game.round
+        face_down = phase not in (GamePhase.HAND_OVER, GamePhase.GAME_OVER)
+        for i, card in enumerate(r.bot2_hand.cards):
+            w = CardWidget(card=card, face_down=face_down)
+            self._bot2_card_widgets.append(w)
+            self._bot2_cards_grid.addWidget(w, i // 2, i % 2)
 
     @staticmethod
     def _clear_layout(layout) -> None:
         while layout.count():
             item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    @staticmethod
+    def _clear_grid(grid: QGridLayout) -> None:
+        while grid.count():
+            item = grid.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
@@ -299,18 +417,16 @@ class MainWindow(QMainWindow):
             has_open_bet = b_obj is not None and b_obj.fold_winner is not None
 
             if has_open_bet:
-                # Responding
-                b1 = _make_btn("QUIERO", bg="#1A5E2A", hov="#27AE60", prs="#0F3A1A")
+                b1 = _make_btn("QUIERO",    bg="#1A5E2A", hov="#27AE60", prs="#0F3A1A")
                 b1.clicked.connect(lambda: self._on_player_action("quiero"))
                 b2 = _make_btn("NO QUIERO", bg="#8B2200", hov="#B03000", prs="#600F00")
                 b2.clicked.connect(lambda: self._on_player_action("no_quiero"))
-                b3 = _make_btn("ENVIDO", bg="#14456B", hov="#1A6EA8", prs="#0A2A45")
+                b3 = _make_btn("ENVIDO",    bg="#14456B", hov="#1A6EA8", prs="#0A2A45")
                 b3.clicked.connect(lambda: self._on_player_action("envido"))
-                b4 = _make_btn("ÓRDAGO", bg="#5C2D00", hov="#8B4500", prs="#3A1A00")
+                b4 = _make_btn("ÓRDAGO",    bg="#5C2D00", hov="#8B4500", prs="#3A1A00")
                 b4.clicked.connect(lambda: self._on_player_action("ordago"))
                 add(b1); add(b2); add(b3); add(b4)
             else:
-                # Opening
                 b1 = _make_btn("PASO")
                 b1.clicked.connect(lambda: self._on_player_action("paso"))
                 b2 = _make_btn("ENVIDO", bg="#14456B", hov="#1A6EA8", prs="#0A2A45")
@@ -342,25 +458,57 @@ class MainWindow(QMainWindow):
         r = self._game.round
         show_evals = phase in (GamePhase.HAND_OVER, GamePhase.GAME_OVER)
         if show_evals:
-            p = r.player_hand
-            b = r.bot_hand
-            p_g = HandEvaluator.evaluate_grande(p).description()
-            p_c = HandEvaluator.evaluate_chica(p).description()
-            p_pa = HandEvaluator.evaluate_pares(p).description()
-            p_j = HandEvaluator.evaluate_juego(p).description()
-            b_g = HandEvaluator.evaluate_grande(b).description()
-            b_c = HandEvaluator.evaluate_chica(b).description()
-            b_pa = HandEvaluator.evaluate_pares(b).description()
-            b_j = HandEvaluator.evaluate_juego(b).description()
-            self._player_eval_label.setText(
-                f"Grande: {p_g} | Chica: {p_c} | Pares: {p_pa} | Juego: {p_j}"
-            )
-            self._bot_eval_label.setText(
-                f"Grande: {b_g} | Chica: {b_c} | Pares: {b_pa} | Juego: {b_j}"
-            )
+            def _fmt(hand) -> str:
+                g  = HandEvaluator.evaluate_grande(hand).description()
+                c  = HandEvaluator.evaluate_chica(hand).description()
+                pa = HandEvaluator.evaluate_pares(hand).description()
+                j  = HandEvaluator.evaluate_juego(hand).description()
+                return f"Grande: {g} | Chica: {c} | Pares: {pa} | Juego: {j}"
+
+            self._player_eval_label.setText(_fmt(r.player_hand))
+            self._partner_eval_label.setText(_fmt(r.partner_hand))
+            self._bot1_eval_label.setText(_fmt(r.bot1_hand))
+            self._bot2_eval_label.setText(_fmt(r.bot2_hand))
         else:
             self._player_eval_label.setText("—")
-            self._bot_eval_label.setText("—")
+            self._partner_eval_label.setText("—")
+            self._bot1_eval_label.setText("—")
+            self._bot2_eval_label.setText("—")
+
+    # ------------------------------------------------------------------
+    # Character moods
+    # ------------------------------------------------------------------
+
+    def _update_character_moods(self, phase: GamePhase) -> None:
+        r = self._game.round
+
+        if phase == GamePhase.IDLE:
+            mood_ally = mood_enemy = "neutral"
+
+        elif phase in (GamePhase.MUS_DECISION, GamePhase.DISCARDING, GamePhase.BETTING):
+            mood_ally = mood_enemy = "thinking"
+
+        elif phase == GamePhase.LANCE_RESULT and r.betting:
+            lr = r._lance_results.get(r.betting.lance)
+            if lr and lr.player_wins:
+                mood_ally, mood_enemy = "happy", "sad"
+            elif lr and lr.bot_wins:
+                mood_ally, mood_enemy = "sad", "happy"
+            else:
+                mood_ally = mood_enemy = "neutral"
+
+        elif phase in (GamePhase.HAND_OVER, GamePhase.GAME_OVER) and r.hand_result:
+            pa = r.hand_result.player_team_stones_earned
+            ba = r.hand_result.bot_team_stones_earned
+            mood_ally  = "happy" if pa > ba else ("sad" if ba > pa else "neutral")
+            mood_enemy = "happy" if ba > pa else ("sad" if pa > ba else "neutral")
+
+        else:
+            mood_ally = mood_enemy = "neutral"
+
+        self._partner_character.set_mood(mood_ally)
+        self._bot1_character.set_mood(mood_enemy)
+        self._bot2_character.set_mood(mood_enemy)
 
     # ------------------------------------------------------------------
     # Handlers de acciones
@@ -392,10 +540,9 @@ class MainWindow(QMainWindow):
         cards = r.player_hand.cards
         cards[from_idx], cards[to_idx] = cards[to_idx], cards[from_idx]
 
-        # Si estamos en descarte, la selección sigue a la carta, no a la posición
         discards = r.player_discard_indices
         was_from = from_idx in discards
-        was_to   = to_idx   in discards
+        was_to   = to_idx in discards
         if was_from != was_to:
             if was_from:
                 discards.remove(from_idx)
