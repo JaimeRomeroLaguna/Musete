@@ -253,7 +253,7 @@ class MainWindow(QMainWindow):
         self._bot_card_widgets.clear()
 
         r = self._game.round
-        face_down = phase not in (GamePhase.LANCE_RESULT, GamePhase.HAND_OVER, GamePhase.GAME_OVER)
+        face_down = phase not in (GamePhase.HAND_OVER, GamePhase.GAME_OVER)
         for card in r.bot_hand.cards:
             w = CardWidget(card=card, face_down=face_down)
             self._bot_card_widgets.append(w)
