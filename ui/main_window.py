@@ -340,9 +340,7 @@ class MainWindow(QMainWindow):
 
     def _update_eval_labels(self, phase: GamePhase) -> None:
         r = self._game.round
-        show_evals = phase in (
-            GamePhase.LANCE_RESULT, GamePhase.HAND_OVER, GamePhase.GAME_OVER
-        )
+        show_evals = phase in (GamePhase.HAND_OVER, GamePhase.GAME_OVER)
         if show_evals:
             p = r.player_hand
             b = r.bot_hand
